@@ -1,8 +1,7 @@
-"""Hacker News と YouTube 急上昇の TOP10 を集めてメール送信する。
+"""指定カテゴリーの業界ニュースを Google News RSS から集めてメール送信する。
 
 GitHub Actions から3時間おきに実行される想定。
 必要な環境変数:
-  YOUTUBE_API_KEY       - Google Cloud Console で発行した YouTube Data API v3 のキー
   GMAIL_ADDRESS         - 送信元 Gmail アドレス
   GMAIL_APP_PASSWORD    - Gmail のアプリパスワード（2段階認証が必要）
   MAIL_TO               - 送信先アドレス（省略時は GMAIL_ADDRESS 宛）
@@ -11,12 +10,14 @@ GitHub Actions から3時間おきに実行される想定。
 import os
 import smtplib
 import sys
+import xml.etree.ElementTree as ET
 from email.mime.text import MIMEText
 
 import requests
 import yaml
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+NEWS_USER_AGENT = "Mozilla/5.0 (compatible; web-info-collector/1.0)"
 
 
 def load_config():
@@ -24,65 +25,51 @@ def load_config():
         return yaml.safe_load(f)
 
 
-HN_BASE_URL = "https://hacker-news.firebaseio.com/v0"
-
-
-def fetch_hn_top(top_n):
-    resp = requests.get(f"{HN_BASE_URL}/topstories.json", timeout=15)
+def fetch_google_news(query, hl, gl, limit):
+    url = "https://news.google.com/rss/search"
+    params = {"q": query, "hl": hl, "gl": gl, "ceid": f"{gl}:{hl}"}
+    resp = requests.get(
+        url, params=params, headers={"User-Agent": NEWS_USER_AGENT}, timeout=15
+    )
     resp.raise_for_status()
-    story_ids = resp.json()[:top_n]
 
+    root = ET.fromstring(resp.content)
     items = []
-    for story_id in story_ids:
-        resp = requests.get(f"{HN_BASE_URL}/item/{story_id}.json", timeout=15)
-        resp.raise_for_status()
-        d = resp.json()
-        items.append(
-            {
-                "title": d.get("title", "(no title)"),
-                "score": d.get("score", 0),
-                "url": d.get("url") or f"https://news.ycombinator.com/item?id={story_id}",
-            }
-        )
+    for item in root.findall("./channel/item")[:limit]:
+        title = item.findtext("title", default="").strip()
+        link = item.findtext("link", default="").strip()
+        source = item.findtext("source", default="").strip()
+        items.append({"title": title, "link": link, "source": source})
     return items
 
 
-def fetch_youtube_trending(api_key, region_code, top_n):
-    url = "https://www.googleapis.com/youtube/v3/videos"
-    params = {
-        "part": "snippet,statistics",
-        "chart": "mostPopular",
-        "regionCode": region_code,
-        "maxResults": top_n,
-        "key": api_key,
-    }
-    resp = requests.get(url, params=params, timeout=15)
-    resp.raise_for_status()
-    items = []
-    for v in resp.json().get("items", []):
-        items.append(
-            {
-                "title": v["snippet"]["title"],
-                "channel": v["snippet"]["channelTitle"],
-                "views": int(v["statistics"].get("viewCount", 0)),
-                "url": f"https://www.youtube.com/watch?v={v['id']}",
-            }
-        )
-    return items[:top_n]
+def fetch_category_news(category, items_per_query):
+    ja_items = fetch_google_news(category["query_ja"], "ja", "JP", items_per_query)
+    en_items = fetch_google_news(category["query_en"], "en-US", "US", items_per_query)
+    return {"name": category["name"], "ja": ja_items, "en": en_items}
 
 
-def build_email_body(hn_items, youtube_items, subject_prefix):
+def build_email_body(category_results, subject_prefix):
     lines = [f"{subject_prefix}\n"]
 
-    lines.append("■ Hacker News 人気投稿\n")
-    for i, item in enumerate(hn_items, 1):
-        lines.append(f"{i}. {item['title']} (score: {item['score']})")
-        lines.append(f"   {item['url']}")
+    for cat in category_results:
+        lines.append(f"■ {cat['name']}\n")
 
-    lines.append("\n■ YouTube 急上昇\n")
-    for i, item in enumerate(youtube_items, 1):
-        lines.append(f"{i}. {item['title']} - {item['channel']} ({item['views']:,} views)")
-        lines.append(f"   {item['url']}")
+        if cat["ja"]:
+            lines.append("[日本語]")
+            for i, item in enumerate(cat["ja"], 1):
+                source = f" ({item['source']})" if item["source"] else ""
+                lines.append(f"{i}. {item['title']}{source}")
+                lines.append(f"   {item['link']}")
+
+        if cat["en"]:
+            lines.append("[English]")
+            for i, item in enumerate(cat["en"], 1):
+                source = f" ({item['source']})" if item["source"] else ""
+                lines.append(f"{i}. {item['title']}{source}")
+                lines.append(f"   {item['link']}")
+
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -102,7 +89,6 @@ def send_email(subject, body, gmail_address, gmail_app_password, mail_to):
 def main():
     config = load_config()
 
-    youtube_api_key = os.environ.get("YOUTUBE_API_KEY")
     gmail_address = (os.environ.get("GMAIL_ADDRESS") or "").strip()
     gmail_app_password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "").strip()
     mail_to = (os.environ.get("MAIL_TO") or "").strip() or gmail_address
@@ -110,7 +96,6 @@ def main():
     missing = [
         name
         for name, val in [
-            ("YOUTUBE_API_KEY", youtube_api_key),
             ("GMAIL_ADDRESS", gmail_address),
             ("GMAIL_APP_PASSWORD", gmail_app_password),
         ]
@@ -120,18 +105,16 @@ def main():
         print(f"環境変数が不足しています: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
-    hn_items = fetch_hn_top(config["hacker_news"]["top_n"])
-    youtube_items = fetch_youtube_trending(
-        youtube_api_key,
-        config["youtube"]["region_code"],
-        config["youtube"]["top_n"],
-    )
+    items_per_query = config["items_per_query"]
+    category_results = [
+        fetch_category_news(category, items_per_query)
+        for category in config["categories"]
+    ]
 
     subject_prefix = config["mail"]["subject_prefix"]
-    body = build_email_body(hn_items, youtube_items, subject_prefix)
-    subject = subject_prefix
+    body = build_email_body(category_results, subject_prefix)
 
-    send_email(subject, body, gmail_address, gmail_app_password, mail_to)
+    send_email(subject_prefix, body, gmail_address, gmail_app_password, mail_to)
     print("メール送信完了")
 
 

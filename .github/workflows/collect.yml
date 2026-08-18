@@ -1,4 +1,4 @@
-name: Collect and email top10
+name: Collect industry news and email
 
 on:
   schedule:
@@ -20,7 +20,6 @@ jobs:
 
       - name: Run collector
         env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}

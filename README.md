@@ -1,35 +1,29 @@
 # Web情報収集アプリ
 
-Hacker News の人気投稿と YouTube 急上昇（日本）の TOP10 を3時間おきに集めて、
+食品輸出・海外進出・海外輸出コンテナー・海上輸送・海外外食開店・日本食に関する
+ニュースを Google News RSS（日本語＋英語）から3時間おきに集めて、
 Gmail からメールで送信する GitHub Actions ベースのツール。
-
-> Reddit は2025年11月からの「Responsible Builder Policy」により、新規の
-> API利用登録が手動審査制になり個人開発では実質利用できなくなったため、
-> 認証不要で無料の Hacker News API に差し替えている。
 
 ## 動くしくみ
 
 1. `.github/workflows/collect.yml` が3時間ごと（`0 */3 * * *`）に GitHub Actions 上で `collect.py` を実行
-2. `collect.py` が Hacker News API（認証不要）と YouTube Data API v3 からデータ取得
-3. TOP10をまとめたテキストメールを Gmail 経由で送信
+2. `collect.py` が `config.yaml` の各カテゴリーについて、日本語・英語それぞれで
+   Google News RSS（`news.google.com/rss/search`、認証不要）を検索
+3. カテゴリー別にまとめたテキストメールを Gmail 経由で送信
+
+> Google News RSS の利用規約は「個人利用目的のフィードリーダーでの表示」を
+> 前提としている（フィード内に明記）。業務での継続利用を想定する場合は、
+> 将来的に NewsAPI や商用ニュースAPIへの切り替えも検討してください。
 
 ## セットアップ手順
 
-### 1. YouTube Data API キーの取得
-
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成
-2. 「YouTube Data API v3」を有効化
-3. 「認証情報」から API キーを発行
-
-無料枠は1日10,000ユニットで、この用途（3時間ごと・1日8回実行）なら十分収まります。
-
-### 2. Gmail アプリパスワードの取得
+### 1. Gmail アプリパスワードの取得
 
 1. 送信に使う Gmail アカウントで2段階認証を有効化
 2. [Googleアカウントのセキュリティ設定](https://myaccount.google.com/security) →
    「アプリパスワード」で16桁のパスワードを発行
 
-### 3. GitHub リポジトリの準備
+### 2. GitHub リポジトリの準備
 
 このディレクトリを GitHub リポジトリにする（まだの場合）:
 
@@ -40,20 +34,19 @@ git commit -m "Initial commit"
 gh repo create <repo名> --private --source=. --push
 ```
 
-### 4. GitHub Secrets の登録
+### 3. GitHub Secrets の登録
 
 リポジトリの Settings → Secrets and variables → Actions で以下を登録:
 
 | Secret名 | 内容 |
 |---|---|
-| `YOUTUBE_API_KEY` | 手順1で発行したAPIキー |
 | `GMAIL_ADDRESS` | 送信元Gmailアドレス |
-| `GMAIL_APP_PASSWORD` | 手順2で発行したアプリパスワード |
+| `GMAIL_APP_PASSWORD` | 手順1で発行したアプリパスワード |
 | `MAIL_TO` | 送信先アドレス（省略時は `GMAIL_ADDRESS` 宛） |
 
-### 5. 動作確認
+### 4. 動作確認
 
-Secrets登録後、Actions タブから `Collect and email top10` を選び
+Secrets登録後、Actions タブから `Collect industry news and email` を選び
 「Run workflow」で手動実行して、メールが届くか確認する。
 
 ## ローカルでのテスト実行
@@ -62,7 +55,6 @@ Secrets登録後、Actions タブから `Collect and email top10` を選び
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-export YOUTUBE_API_KEY=xxx
 export GMAIL_ADDRESS=xxx@gmail.com
 export GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 export MAIL_TO=xxx@gmail.com
@@ -74,9 +66,11 @@ python collect.py
 
 `config.yaml` で以下を調整できる:
 
-- `hacker_news.top_n`: Hacker News の取得件数
-- `youtube.region_code`: 急上昇の対象地域（デフォルト `JP`）
-- 各 `top_n`: 取得件数
+- `categories`: カテゴリー名と検索クエリ（日本語 `query_ja` / 英語 `query_en`）
+  - カテゴリーの追加・削除・キーワード変更が可能
+- `items_per_query`: 各カテゴリー・各言語ごとに取得する件数（デフォルト3件）
+
+現在のカテゴリー：食品 / 海外進出 / 海外輸出コンテナー / 輸出海上輸出 / 海外へ外食開店 / 日本食
 
 実行頻度を変えたい場合は `.github/workflows/collect.yml` の `cron` を編集する
 （例: 毎時なら `0 * * * *`）。

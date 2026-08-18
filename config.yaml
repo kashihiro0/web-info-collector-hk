@@ -1,10 +1,25 @@
 # 収集設定
-hacker_news:
-  top_n: 10
+categories:
+  - name: 食品
+    query_ja: 食品
+    query_en: food industry
+  - name: 海外進出
+    query_ja: 海外進出
+    query_en: overseas market expansion
+  - name: 海外輸出コンテナー
+    query_ja: 輸出 コンテナー
+    query_en: export container shipping
+  - name: 輸出海上輸出
+    query_ja: 輸出 海上輸送
+    query_en: export sea freight
+  - name: 海外へ外食開店
+    query_ja: 海外 外食 開店
+    query_en: restaurant opening overseas
+  - name: 日本食
+    query_ja: 日本食
+    query_en: Japanese food
 
-youtube:
-  region_code: JP
-  top_n: 10
+items_per_query: 3   # 各カテゴリーの日本語・英語それぞれで取得する件数
 
 mail:
-  subject_prefix: "[Web情報収集] TOP10"
+  subject_prefix: "[Web情報収集] 業界ニュース"
