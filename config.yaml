@@ -1,8 +1,5 @@
 # 収集設定
-reddit:
-  subreddits:
-    - all
-  time_filter: day   # hour, day, week, month, year, all
+hacker_news:
   top_n: 10
 
 youtube:

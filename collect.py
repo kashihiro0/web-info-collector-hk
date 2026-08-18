@@ -1,4 +1,4 @@
-"""Reddit と YouTube 急上昇の TOP10 を集めてメール送信する。
+"""Hacker News と YouTube 急上昇の TOP10 を集めてメール送信する。
 
 GitHub Actions から3時間おきに実行される想定。
 必要な環境変数:
@@ -6,8 +6,6 @@ GitHub Actions から3時間おきに実行される想定。
   GMAIL_ADDRESS         - 送信元 Gmail アドレス
   GMAIL_APP_PASSWORD    - Gmail のアプリパスワード（2段階認証が必要）
   MAIL_TO               - 送信先アドレス（省略時は GMAIL_ADDRESS 宛）
-任意:
-  REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET - 未設定なら Reddit 収集はスキップ
 """
 
 import os
@@ -26,45 +24,27 @@ def load_config():
         return yaml.safe_load(f)
 
 
-REDDIT_USER_AGENT = "web-info-collector/1.0 (personal script)"
+HN_BASE_URL = "https://hacker-news.firebaseio.com/v0"
 
 
-def get_reddit_access_token(client_id, client_secret):
-    resp = requests.post(
-        "https://www.reddit.com/api/v1/access_token",
-        auth=(client_id, client_secret),
-        data={"grant_type": "client_credentials"},
-        headers={"User-Agent": REDDIT_USER_AGENT},
-        timeout=15,
-    )
+def fetch_hn_top(top_n):
+    resp = requests.get(f"{HN_BASE_URL}/topstories.json", timeout=15)
     resp.raise_for_status()
-    return resp.json()["access_token"]
+    story_ids = resp.json()[:top_n]
 
-
-def fetch_reddit_top(subreddits, time_filter, top_n, client_id, client_secret):
-    token = get_reddit_access_token(client_id, client_secret)
-    headers = {
-        "User-Agent": REDDIT_USER_AGENT,
-        "Authorization": f"bearer {token}",
-    }
     items = []
-    for sub in subreddits:
-        url = f"https://oauth.reddit.com/r/{sub}/top"
-        params = {"t": time_filter, "limit": top_n}
-        resp = requests.get(url, headers=headers, params=params, timeout=15)
+    for story_id in story_ids:
+        resp = requests.get(f"{HN_BASE_URL}/item/{story_id}.json", timeout=15)
         resp.raise_for_status()
-        for child in resp.json()["data"]["children"]:
-            d = child["data"]
-            items.append(
-                {
-                    "title": d["title"],
-                    "score": d["score"],
-                    "url": f"https://reddit.com{d['permalink']}",
-                    "subreddit": d["subreddit"],
-                }
-            )
-    items.sort(key=lambda x: x["score"], reverse=True)
-    return items[:top_n]
+        d = resp.json()
+        items.append(
+            {
+                "title": d.get("title", "(no title)"),
+                "score": d.get("score", 0),
+                "url": d.get("url") or f"https://news.ycombinator.com/item?id={story_id}",
+            }
+        )
+    return items
 
 
 def fetch_youtube_trending(api_key, region_code, top_n):
@@ -91,16 +71,13 @@ def fetch_youtube_trending(api_key, region_code, top_n):
     return items[:top_n]
 
 
-def build_email_body(reddit_items, youtube_items, subject_prefix):
+def build_email_body(hn_items, youtube_items, subject_prefix):
     lines = [f"{subject_prefix}\n"]
 
-    lines.append("■ Reddit 人気投稿\n")
-    if reddit_items:
-        for i, item in enumerate(reddit_items, 1):
-            lines.append(f"{i}. [{item['subreddit']}] {item['title']} (score: {item['score']})")
-            lines.append(f"   {item['url']}")
-    else:
-        lines.append("（未設定のためスキップ）")
+    lines.append("■ Hacker News 人気投稿\n")
+    for i, item in enumerate(hn_items, 1):
+        lines.append(f"{i}. {item['title']} (score: {item['score']})")
+        lines.append(f"   {item['url']}")
 
     lines.append("\n■ YouTube 急上昇\n")
     for i, item in enumerate(youtube_items, 1):
@@ -125,8 +102,6 @@ def send_email(subject, body, gmail_address, gmail_app_password, mail_to):
 def main():
     config = load_config()
 
-    reddit_client_id = os.environ.get("REDDIT_CLIENT_ID")
-    reddit_client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
     youtube_api_key = os.environ.get("YOUTUBE_API_KEY")
     gmail_address = (os.environ.get("GMAIL_ADDRESS") or "").strip()
     gmail_app_password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "").strip()
@@ -145,17 +120,7 @@ def main():
         print(f"環境変数が不足しています: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
-    reddit_items = []
-    if reddit_client_id and reddit_client_secret:
-        reddit_items = fetch_reddit_top(
-            config["reddit"]["subreddits"],
-            config["reddit"]["time_filter"],
-            config["reddit"]["top_n"],
-            reddit_client_id,
-            reddit_client_secret,
-        )
-    else:
-        print("Reddit の認証情報がないため、Reddit 収集はスキップします")
+    hn_items = fetch_hn_top(config["hacker_news"]["top_n"])
     youtube_items = fetch_youtube_trending(
         youtube_api_key,
         config["youtube"]["region_code"],
@@ -163,7 +128,7 @@ def main():
     )
 
     subject_prefix = config["mail"]["subject_prefix"]
-    body = build_email_body(reddit_items, youtube_items, subject_prefix)
+    body = build_email_body(hn_items, youtube_items, subject_prefix)
     subject = subject_prefix
 
     send_email(subject, body, gmail_address, gmail_app_password, mail_to)
