@@ -2,12 +2,12 @@
 
 GitHub Actions から3時間おきに実行される想定。
 必要な環境変数:
-  REDDIT_CLIENT_ID     - Reddit script app のクライアントID
-  REDDIT_CLIENT_SECRET - Reddit script app のシークレット
   YOUTUBE_API_KEY       - Google Cloud Console で発行した YouTube Data API v3 のキー
   GMAIL_ADDRESS         - 送信元 Gmail アドレス
   GMAIL_APP_PASSWORD    - Gmail のアプリパスワード（2段階認証が必要）
   MAIL_TO               - 送信先アドレス（省略時は GMAIL_ADDRESS 宛）
+任意:
+  REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET - 未設定なら Reddit 収集はスキップ
 """
 
 import os
@@ -95,9 +95,12 @@ def build_email_body(reddit_items, youtube_items, subject_prefix):
     lines = [f"{subject_prefix}\n"]
 
     lines.append("■ Reddit 人気投稿\n")
-    for i, item in enumerate(reddit_items, 1):
-        lines.append(f"{i}. [{item['subreddit']}] {item['title']} (score: {item['score']})")
-        lines.append(f"   {item['url']}")
+    if reddit_items:
+        for i, item in enumerate(reddit_items, 1):
+            lines.append(f"{i}. [{item['subreddit']}] {item['title']} (score: {item['score']})")
+            lines.append(f"   {item['url']}")
+    else:
+        lines.append("（未設定のためスキップ）")
 
     lines.append("\n■ YouTube 急上昇\n")
     for i, item in enumerate(youtube_items, 1):
@@ -127,13 +130,11 @@ def main():
     youtube_api_key = os.environ.get("YOUTUBE_API_KEY")
     gmail_address = os.environ.get("GMAIL_ADDRESS")
     gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD")
-    mail_to = os.environ.get("MAIL_TO", gmail_address)
+    mail_to = os.environ.get("MAIL_TO") or gmail_address
 
     missing = [
         name
         for name, val in [
-            ("REDDIT_CLIENT_ID", reddit_client_id),
-            ("REDDIT_CLIENT_SECRET", reddit_client_secret),
             ("YOUTUBE_API_KEY", youtube_api_key),
             ("GMAIL_ADDRESS", gmail_address),
             ("GMAIL_APP_PASSWORD", gmail_app_password),
@@ -144,13 +145,17 @@ def main():
         print(f"環境変数が不足しています: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
-    reddit_items = fetch_reddit_top(
-        config["reddit"]["subreddits"],
-        config["reddit"]["time_filter"],
-        config["reddit"]["top_n"],
-        reddit_client_id,
-        reddit_client_secret,
-    )
+    reddit_items = []
+    if reddit_client_id and reddit_client_secret:
+        reddit_items = fetch_reddit_top(
+            config["reddit"]["subreddits"],
+            config["reddit"]["time_filter"],
+            config["reddit"]["top_n"],
+            reddit_client_id,
+            reddit_client_secret,
+        )
+    else:
+        print("Reddit の認証情報がないため、Reddit 収集はスキップします")
     youtube_items = fetch_youtube_trending(
         youtube_api_key,
         config["youtube"]["region_code"],
