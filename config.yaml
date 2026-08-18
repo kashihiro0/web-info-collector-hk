@@ -21,5 +21,24 @@ categories:
 
 items_per_query: 3   # 各カテゴリーの日本語・英語それぞれで取得する件数
 
+# 主要紙・専門紙を優先的に拾うための絞り込み対象（Google Newsのsite:検索）
+named_sources:
+  - name: 日本経済新聞
+    domain: nikkei.com
+  - name: 朝日新聞
+    domain: asahi.com
+  - name: 読売新聞
+    domain: yomiuri.co.jp
+  - name: 毎日新聞
+    domain: mainichi.jp
+  - name: 産経新聞
+    domain: sankei.com
+  - name: 食料新聞
+    domain: syokuryou-shinbun.com
+  - name: シッピング・ガゼット
+    domain: japanpress.co.jp
+
+items_per_named_query: 5   # 主要紙絞り込み検索で各カテゴリーごとに取得する件数
+
 mail:
   subject_prefix: "[Web情報収集] 業界ニュース"

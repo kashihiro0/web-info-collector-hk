@@ -11,13 +11,16 @@ import os
 import smtplib
 import sys
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
+from email.utils import parsedate_to_datetime
 
 import requests
 import yaml
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 NEWS_USER_AGENT = "Mozilla/5.0 (compatible; web-info-collector/1.0)"
+MAX_AGE_DAYS = 30
 
 
 def load_config():
@@ -27,26 +30,57 @@ def load_config():
 
 def fetch_google_news(query, hl, gl, limit):
     url = "https://news.google.com/rss/search"
-    params = {"q": query, "hl": hl, "gl": gl, "ceid": f"{gl}:{hl}"}
+    params = {
+        "q": f"{query} when:{MAX_AGE_DAYS}d",
+        "hl": hl,
+        "gl": gl,
+        "ceid": f"{gl}:{hl}",
+    }
     resp = requests.get(
         url, params=params, headers={"User-Agent": NEWS_USER_AGENT}, timeout=15
     )
     resp.raise_for_status()
 
+    cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)
     root = ET.fromstring(resp.content)
     items = []
-    for item in root.findall("./channel/item")[:limit]:
+    for item in root.findall("./channel/item"):
+        pub_date_text = item.findtext("pubDate", default="")
+        try:
+            pub_date = parsedate_to_datetime(pub_date_text)
+        except (TypeError, ValueError):
+            pub_date = None
+        if pub_date is not None and pub_date < cutoff:
+            continue
+
         title = item.findtext("title", default="").strip()
         link = item.findtext("link", default="").strip()
         source = item.findtext("source", default="").strip()
         items.append({"title": title, "link": link, "source": source})
+        if len(items) >= limit:
+            break
     return items
 
 
-def fetch_category_news(category, items_per_query):
+def build_site_restricted_query(query, domains):
+    site_filter = " OR ".join(f"site:{domain}" for domain in domains)
+    return f"{query} ({site_filter})"
+
+
+def fetch_category_news(category, items_per_query, named_sources, items_per_named_query):
+    named_items = []
+    if named_sources:
+        domains = [s["domain"] for s in named_sources]
+        named_query = build_site_restricted_query(category["query_ja"], domains)
+        named_items = fetch_google_news(named_query, "ja", "JP", items_per_named_query)
+
     ja_items = fetch_google_news(category["query_ja"], "ja", "JP", items_per_query)
     en_items = fetch_google_news(category["query_en"], "en-US", "US", items_per_query)
-    return {"name": category["name"], "ja": ja_items, "en": en_items}
+
+    named_links = {item["link"] for item in named_items}
+    ja_items = [item for item in ja_items if item["link"] not in named_links]
+
+    return {"name": category["name"], "ja": ja_items, "en": en_items, "named": named_items}
 
 
 def build_email_body(category_results, subject_prefix):
@@ -54,6 +88,13 @@ def build_email_body(category_results, subject_prefix):
 
     for cat in category_results:
         lines.append(f"■ {cat['name']}\n")
+
+        if cat["named"]:
+            lines.append("[主要紙・専門紙]")
+            for i, item in enumerate(cat["named"], 1):
+                source = f" ({item['source']})" if item["source"] else ""
+                lines.append(f"{i}. {item['title']}{source}")
+                lines.append(f"   {item['link']}")
 
         if cat["ja"]:
             lines.append("[日本語]")
@@ -106,8 +147,10 @@ def main():
         sys.exit(1)
 
     items_per_query = config["items_per_query"]
+    named_sources = config.get("named_sources", [])
+    items_per_named_query = config.get("items_per_named_query", items_per_query)
     category_results = [
-        fetch_category_news(category, items_per_query)
+        fetch_category_news(category, items_per_query, named_sources, items_per_named_query)
         for category in config["categories"]
     ]
 
