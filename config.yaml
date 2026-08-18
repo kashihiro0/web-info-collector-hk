@@ -1,0 +1,13 @@
+# 収集設定
+reddit:
+  subreddits:
+    - all
+  time_filter: day   # hour, day, week, month, year, all
+  top_n: 10
+
+youtube:
+  region_code: JP
+  top_n: 10
+
+mail:
+  subject_prefix: "[Web情報収集] TOP10"
