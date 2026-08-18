@@ -128,9 +128,9 @@ def main():
     reddit_client_id = os.environ.get("REDDIT_CLIENT_ID")
     reddit_client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
     youtube_api_key = os.environ.get("YOUTUBE_API_KEY")
-    gmail_address = os.environ.get("GMAIL_ADDRESS")
-    gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD")
-    mail_to = os.environ.get("MAIL_TO") or gmail_address
+    gmail_address = (os.environ.get("GMAIL_ADDRESS") or "").strip()
+    gmail_app_password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "").strip()
+    mail_to = (os.environ.get("MAIL_TO") or "").strip() or gmail_address
 
     missing = [
         name
